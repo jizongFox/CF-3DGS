@@ -6,25 +6,22 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import os
 import sys
-from argparse import ArgumentParser, Namespace
-
-from trainer.cf3dgs_trainer import CFGaussianTrainer
-from arguments import ModelParams, PipelineParams, OptimizationParams
+from argparse import ArgumentParser
+from datetime import datetime
 
 import torch
-import pdb
-from datetime import datetime
+
+from arguments import ModelParams, PipelineParams, OptimizationParams
+from trainer.cf3dgs_trainer import CFGaussianTrainer
 
 
 def contruct_pose(poses):
     n_trgt = poses.shape[0]
     # for i in range(n_trgt-1):
     #     poses[i+1] = poses[i+1] @ torch.inverse(poses[i])
-    for i in range(n_trgt-1, 0, -1):
-        poses = torch.cat(
-            (poses[:i], poses[[i-1]]@poses[i:]), 0)
+    for i in range(n_trgt - 1, 0, -1):
+        poses = torch.cat((poses[:i], poses[[i - 1]] @ poses[i:]), 0)
     return poses
 
 
@@ -52,4 +49,4 @@ if __name__ == "__main__":
     elif model_cfg.mode == "eval_pose":
         trainer.eval_pose()
     end_time = datetime.now()
-    print('Duration: {}'.format(end_time - start_time))
+    print("Duration: {}".format(end_time - start_time))

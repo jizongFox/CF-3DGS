@@ -8,10 +8,11 @@
 # For inquiries contact  george.drettakis@inria.fr
 
 
-import torch
 import math
-import numpy as np
 from typing import NamedTuple
+
+import numpy as np
+import torch
 
 
 class BasicPointCloud(NamedTuple):
@@ -54,7 +55,7 @@ def getWorld2View(R, t):
     return np.float32(Rt)
 
 
-def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+def getWorld2View2(R, t, translate=np.array([0.0, 0.0, 0.0]), scale=1.0):
     Rt = np.zeros((4, 4))
     Rt[:3, :3] = R.transpose()
     Rt[:3, 3] = t
@@ -68,7 +69,7 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
     return np.float32(Rt)
 
 
-def getWorld2View3(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+def getWorld2View3(R, t, translate=np.array([0.0, 0.0, 0.0]), scale=1.0):
     Rt = np.zeros((4, 4))
     Rt[:3, :3] = R
     Rt[:3, 3] = t
@@ -110,22 +111,22 @@ def fov2focal(fov, pixels):
 
 
 def focal2fov(focal, pixels):
-    return 2*math.atan(pixels/(2*focal))
+    return 2 * math.atan(pixels / (2 * focal))
 
 
 def procrustes(S1, S2):
-    '''
+    """
     Computes a similarity transform (sR, t) that takes
     a set of 3D points S1 (3 x N) closest to a set of 3D points S2,
     where R is an 3x3 rotation matrix, t 3x1 translation, s scale.
     i.e. solves the orthogonal Procrutes problem.
-    '''
+    """
     transposed = False
     if S1.shape[0] != 3 and S1.shape[0] != 2:
         S1 = S1.T
         S2 = S2.T
         transposed = True
-    assert (S2.shape[1] == S1.shape[1])
+    assert S2.shape[1] == S1.shape[1]
 
     # 1. Remove mean.
     mu1 = S1.mean(axis=1, keepdims=True)
@@ -175,69 +176,69 @@ def procrustes(S1, S2):
     T_ = torch.eye(4).to(S1)
     T_[:3, -1] = t.squeeze(-1)
     S_ = torch.eye(4).to(S1)
-    transf = T_@S_@R_
+    transf = T_ @ S_ @ R_
 
     return S1_hat, transf
 
 
 # def procrustes(S1, S2,weights=None):
-    # '''
-    # Computes a similarity transform (sR, t) that takes
-    # a set of 3D points S1 (BxNx3) closest to a set of 3D points, S2,
-    # where R is an 3x3 rotation matrix, t 3x1 translation, s scale. / mod : assuming scale is 1
-    # i.e. solves the orthogonal Procrutes problem.
-    # '''
-    # transposed = False
-    # if S1.shape[0] != 3 and S1.shape[0] != 2:
-    #     S1 = S1.T
-    #     S2 = S2.T
-    #     transposed = True
-    # assert (S2.shape[1] == S1.shape[1])
+# '''
+# Computes a similarity transform (sR, t) that takes
+# a set of 3D points S1 (BxNx3) closest to a set of 3D points, S2,
+# where R is an 3x3 rotation matrix, t 3x1 translation, s scale. / mod : assuming scale is 1
+# i.e. solves the orthogonal Procrutes problem.
+# '''
+# transposed = False
+# if S1.shape[0] != 3 and S1.shape[0] != 2:
+#     S1 = S1.T
+#     S2 = S2.T
+#     transposed = True
+# assert (S2.shape[1] == S1.shape[1])
 
-    # if weights is None:
-    #     weights = torch.ones_like(S1[:1,:])
+# if weights is None:
+#     weights = torch.ones_like(S1[:1,:])
 
-    # # 1. Remove mean.
-    # weights_norm = weights/(weights.sum(-1, keepdim=True) + 1e-6)
-    # mu1 = (S1*weights_norm).sum(1, keepdim=True)
-    # mu2 = (S2*weights_norm).sum(1, keepdim=True)
+# # 1. Remove mean.
+# weights_norm = weights/(weights.sum(-1, keepdim=True) + 1e-6)
+# mu1 = (S1*weights_norm).sum(1, keepdim=True)
+# mu2 = (S2*weights_norm).sum(1, keepdim=True)
 
-    # X1 = S1 - mu1
-    # X2 = S2 - mu2
+# X1 = S1 - mu1
+# X2 = S2 - mu2
 
-    # # diags = torch.stack([torch.diag(w.squeeze(0)) for w in weights]) # does batched version exist?
-    # diags = torch.diag(weights.squeeze())
+# # diags = torch.stack([torch.diag(w.squeeze(0)) for w in weights]) # does batched version exist?
+# diags = torch.diag(weights.squeeze())
 
-    # # 3. The outer product of X1 and X2.
-    # K = (X1@diags).mm(X2.T)
-    # # K = (X1@diags).bmm(X2.permute(0,2,1))
+# # 3. The outer product of X1 and X2.
+# K = (X1@diags).mm(X2.T)
+# # K = (X1@diags).bmm(X2.permute(0,2,1))
 
-    # # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
-    # U, s, V = torch.svd(K)
+# # 4. Solution that Maximizes trace(R'K) is R=U*V', where U, V are singular vectors of K.
+# U, s, V = torch.svd(K)
 
-    # # Construct Z that fixes the orientation of R to get det(R)=1.
-    # Z = torch.eye(U.shape[0], device=S1.device)
-    # Z[-1, -1] *= torch.sign(torch.det(U @ V.T))
-    # # Construct R.
-    # R = V.mm(Z.mm(U.T))
+# # Construct Z that fixes the orientation of R to get det(R)=1.
+# Z = torch.eye(U.shape[0], device=S1.device)
+# Z[-1, -1] *= torch.sign(torch.det(U @ V.T))
+# # Construct R.
+# R = V.mm(Z.mm(U.T))
 
-    # # 6. Recover translation.
-    # t = mu2 - ((R.mm(mu1)))
+# # 6. Recover translation.
+# t = mu2 - ((R.mm(mu1)))
 
-    # # 7. Error:
-    # S1_hat = R.mm(S1) + t
-    # if transposed:
-    #     S1_hat = S1_hat.T
+# # 7. Error:
+# S1_hat = R.mm(S1) + t
+# if transposed:
+#     S1_hat = S1_hat.T
 
-    # # Combine recovered transformation as single matrix
-    # R_=torch.eye(4).to(S1)
-    # R_[:3, :3]=R
-    # T_=torch.eye(4).to(S1)
-    # T_[:3, -1]=t.squeeze(-1)
-    # S_=torch.eye(4).to(S1)
-    # transf = T_@S_@R_
+# # Combine recovered transformation as single matrix
+# R_=torch.eye(4).to(S1)
+# R_[:3, :3]=R
+# T_=torch.eye(4).to(S1)
+# T_[:3, -1]=t.squeeze(-1)
+# S_=torch.eye(4).to(S1)
+# transf = T_@S_@R_
 
-    # return (S1_hat-S2).square().mean(),transf
+# return (S1_hat-S2).square().mean(),transf
 
 
 def convert3x4_4x4(input):
@@ -248,20 +249,30 @@ def convert3x4_4x4(input):
     """
     if torch.is_tensor(input):
         if len(input.shape) == 3:
-            output = torch.cat([input, torch.zeros_like(
-                input[:, 0:1])], dim=1)  # (N, 4, 4)
+            output = torch.cat(
+                [input, torch.zeros_like(input[:, 0:1])], dim=1
+            )  # (N, 4, 4)
             output[:, 3, 3] = 1.0
         else:
-            output = torch.cat([input, torch.tensor(
-                [[0, 0, 0, 1]], dtype=input.dtype, device=input.device)], dim=0)  # (4, 4)
+            output = torch.cat(
+                [
+                    input,
+                    torch.tensor(
+                        [[0, 0, 0, 1]], dtype=input.dtype, device=input.device
+                    ),
+                ],
+                dim=0,
+            )  # (4, 4)
     else:
         if len(input.shape) == 3:
             output = np.concatenate(
-                [input, np.zeros_like(input[:, 0:1])], axis=1)  # (N, 4, 4)
+                [input, np.zeros_like(input[:, 0:1])], axis=1
+            )  # (N, 4, 4)
             output[:, 3, 3] = 1.0
         else:
             output = np.concatenate(
-                [input, np.array([[0, 0, 0, 1]], dtype=input.dtype)], axis=0)  # (4, 4)
+                [input, np.array([[0, 0, 0, 1]], dtype=input.dtype)], axis=0
+            )  # (4, 4)
             output[3, 3] = 1.0
     return output
 
@@ -293,15 +304,15 @@ def align_umeyama(model, data, known_scale=False):
     n = np.shape(model)[0]
 
     # correlation
-    C = 1.0/n*np.dot(model_zerocentered.transpose(), data_zerocentered)
-    sigma2 = 1.0/n*np.multiply(data_zerocentered, data_zerocentered).sum()
+    C = 1.0 / n * np.dot(model_zerocentered.transpose(), data_zerocentered)
+    sigma2 = 1.0 / n * np.multiply(data_zerocentered, data_zerocentered).sum()
     U_svd, D_svd, V_svd = np.linalg.linalg.svd(C)
 
     D_svd = np.diag(D_svd)
     V_svd = np.transpose(V_svd)
 
     S = np.eye(3)
-    if (np.linalg.det(U_svd)*np.linalg.det(V_svd) < 0):
+    if np.linalg.det(U_svd) * np.linalg.det(V_svd) < 0:
         S[2, 2] = -1
 
     R = np.dot(U_svd, np.dot(S, np.transpose(V_svd)))
@@ -309,9 +320,9 @@ def align_umeyama(model, data, known_scale=False):
     if known_scale:
         s = 1
     else:
-        s = 1.0/sigma2*np.trace(np.dot(D_svd, S))
+        s = 1.0 / sigma2 * np.trace(np.dot(D_svd, S))
 
-    t = mu_M-s*np.dot(R, mu_D)
+    t = mu_M - s * np.dot(R, mu_D)
 
     return s, R, t
 
@@ -327,17 +338,17 @@ def _getIndices(n_aligned, total_n):
 
 # align by similarity transformation
 def align_sim3(p_es, p_gt, n_aligned=-1):
-    '''
+    """
     calculate s, R, t so that:
         gt = R * s * est + t
-    '''
+    """
     idxs = _getIndices(n_aligned, p_es.shape[0])
     est_pos = p_es[idxs, 0:3]
     gt_pos = p_gt[idxs, 0:3]
     try:
         s, R, t = align_umeyama(gt_pos, est_pos)  # note the order
     except:
-        print('[WARNING] align_poses.py: SVD did not converge!')
+        print("[WARNING] align_poses.py: SVD did not converge!")
         s, R, t = 1.0, np.eye(3), np.zeros(3)
     return s, R, t
 
@@ -377,8 +388,7 @@ def align_ate_c2b_use_a2b(traj_a, traj_b, traj_c=None):
 
     R_c_aligned = R @ R_c  # (N1, 3, 3)
     t_c_aligned = s * (R @ t_c) + t  # (N1, 3, 1)
-    traj_c_aligned = np.concatenate(
-        [R_c_aligned, t_c_aligned], axis=2)  # (N1, 3, 4)
+    traj_c_aligned = np.concatenate([R_c_aligned, t_c_aligned], axis=2)  # (N1, 3, 4)
 
     # append the last row
     traj_c_aligned = convert3x4_4x4(traj_c_aligned)  # (N1, 4, 4)

@@ -6,46 +6,42 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import pdb
-from kornia.geometry.depth import depth_to_3d, depth_to_normals
-from pytorch3d.utils import opencv_from_cameras_projection
-from pytorch3d.renderer import PerspectiveCameras
-import pytorch3d
-from utils.image_utils import psnr, colorize
-from utils.loss_utils import l1_loss, ssim
-from scene.cameras import Camera
-from utils.graphics_utils import BasicPointCloud, focal2fov, procrustes, fov2focal
-from scene.gaussian_model import GaussianModel
-from scene import Scene
-from gaussian_renderer import render
-from arguments import ModelParams, PipelineParams, OptimizationParams
-from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
-from scene.dataset_readers import sceneLoadTypeCallbacks, CameraInfo, read_intrinsics_binary
 import glob
-from copy import copy
-import open3d as o3d
-from einops import rearrange
-from PIL import Image
-import os
-from tqdm import tqdm
-import math
-import numpy as np
-import cv2
-from collections import defaultdict, OrderedDict
-import json
 import gzip
+import json
+import math
+import os
+from collections import defaultdict, OrderedDict
+from copy import copy
+
+import cv2
+import numpy as np
+import open3d as o3d
 import torch
-import torch.nn.functional as F
+from PIL import Image
+from kornia.geometry.depth import depth_to_3d
+from pytorch3d.renderer import PerspectiveCameras
+from pytorch3d.utils import opencv_from_cameras_projection
+from tqdm import tqdm
+
+from gaussian_renderer import render
+from scene import Scene
+from scene.cameras import Camera
+from scene.dataset_readers import read_intrinsics_binary
+from scene.gaussian_model import GaussianModel
+from utils.graphics_utils import BasicPointCloud, focal2fov, fov2focal
+from utils.image_utils import psnr, colorize
+from utils.loss_utils import l1_loss
+
 torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=True)
 
 
 class GaussianTrainer(object):
-
     def __init__(self, data_root, model_cfg, pipe_cfg, optim_cfg):
         self.model_cfg = model_cfg
         self.pipe_cfg = pipe_cfg
         self.optim_cfg = optim_cfg
-        data_info = data_root.split('/')
+        data_info = data_root.split("/")
         self.seq_name = data_info[-1]
         self.category = data_info[-2]
         self.data_root = data_root.split(self.category)[0]
@@ -64,12 +60,13 @@ class GaussianTrainer(object):
         """
 
         principal_point = torch.tensor(
-            data["viewpoint"]["principal_point"], dtype=torch.float)
+            data["viewpoint"]["principal_point"], dtype=torch.float
+        )
         focal_length = torch.tensor(
-            data["viewpoint"]["focal_length"], dtype=torch.float)
+            data["viewpoint"]["focal_length"], dtype=torch.float
+        )
         half_image_size_wh_orig = (
-            torch.tensor(
-                list(reversed(data["image"]["size"])), dtype=torch.float) / 2.0
+            torch.tensor(list(reversed(data["image"]["size"])), dtype=torch.float) / 2.0
         )
         format_ = data["viewpoint"]["intrinsics_format"]
         if format_.lower() == "ndc_norm_image_bounds":
@@ -86,8 +83,7 @@ class GaussianTrainer(object):
         # now, convert from pixels to PyTorch3D v0.5+ NDC convention
         out_size = list(reversed(data["image"]["size"]))
 
-        half_image_size_output = torch.tensor(
-            out_size, dtype=torch.float) / 2.0
+        half_image_size_output = torch.tensor(out_size, dtype=torch.float) / 2.0
         half_min_image_size_output = half_image_size_output.min()
 
         # rescaled principal point and focal length in ndc
@@ -110,7 +106,9 @@ class GaussianTrainer(object):
 
         return R[0].numpy(), t[0].numpy(), FoVx, FoVy, intr_mat[0].numpy()
 
-    def setup_depth_predictor(self,):
+    def setup_depth_predictor(
+        self,
+    ):
         # we recommand to use the following depth models:
         # - "midas" for the Tank and Temples dataset
         # - "zoe" for the CO3D dataset
@@ -124,24 +122,35 @@ class GaussianTrainer(object):
         elif self.depth_model_type == "depth_anything":
             from torchvision.transforms import Compose
             from submodules.DepthAnything.depth_anything.dpt import DepthAnything
-            from submodules.DepthAnything.depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
-            encoder = 'vits' # can also be 'vitb' or 'vitl'
-            depth_anything = DepthAnything.from_pretrained('LiheYoung/depth_anything_{:}14'.format(encoder)).eval()
+            from submodules.DepthAnything.depth_anything.util.transform import (
+                Resize,
+                NormalizeImage,
+                PrepareForNet,
+            )
+
+            encoder = "vits"  # can also be 'vitb' or 'vitl'
+            depth_anything = DepthAnything.from_pretrained(
+                "LiheYoung/depth_anything_{:}14".format(encoder)
+            ).eval()
             # depth_anything = DepthAnything.from_pretrained('checkpoints/depth_anything_metric_depth_outdoor', local_files_only=True).eval()
 
-            self.depth_transforms = Compose([
-                Resize(
-                    width=518,
-                    height=518,
-                    resize_target=False,
-                    keep_aspect_ratio=True,
-                    ensure_multiple_of=14,
-                    resize_method='lower_bound',
-                    image_interpolation_method=cv2.INTER_CUBIC,
-                ),
-                NormalizeImage(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                PrepareForNet(),
-            ])
+            self.depth_transforms = Compose(
+                [
+                    Resize(
+                        width=518,
+                        height=518,
+                        resize_target=False,
+                        keep_aspect_ratio=True,
+                        ensure_multiple_of=14,
+                        resize_method="lower_bound",
+                        image_interpolation_method=cv2.INTER_CUBIC,
+                    ),
+                    NormalizeImage(
+                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                    ),
+                    PrepareForNet(),
+                ]
+            )
             self.depth_model = depth_anything
         else:
             midas = torch.hub.load("intel-isl/MiDaS", "DPT_Hybrid")
@@ -154,21 +163,26 @@ class GaussianTrainer(object):
 
     def predict_depth(self, img):
         if self.depth_model_type == "zoe":
-            depth = self.depth_model.infer_pil(Image.fromarray(img.astype(np.uint8)),
-                                               output_type='tensor')
+            depth = self.depth_model.infer_pil(
+                Image.fromarray(img.astype(np.uint8)), output_type="tensor"
+            )
         elif self.depth_model_type == "depth_anything":
-            image = self.depth_transforms({'image': img/255.})['image']
+            image = self.depth_transforms({"image": img / 255.0})["image"]
             image = torch.from_numpy(image).unsqueeze(0)
             # depth shape: 1xHxW
             prediction = self.depth_model(image)
-            prediction = torch.nn.functional.interpolate(
-                prediction.unsqueeze(1),
-                size=img.shape[:2],
-                mode="bicubic",
-                align_corners=False,
-            ).squeeze().detach()
+            prediction = (
+                torch.nn.functional.interpolate(
+                    prediction.unsqueeze(1),
+                    size=img.shape[:2],
+                    mode="bicubic",
+                    align_corners=False,
+                )
+                .squeeze()
+                .detach()
+            )
             # depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-            
+
             # depth = depth.cpu().numpy().astype(np.uint8)
             # depth_color = cv2.applyColorMap(depth, cv2.COLORMAP_INFERNO)
             # pdb.set_trace()
@@ -200,8 +214,16 @@ class GaussianTrainer(object):
     def setup_dataset(self):
         if self.model_cfg.data_type == "co3d":
             sequences = defaultdict(list)
-            dataset = json.loads(gzip.GzipFile(os.path.join(self.data_root, self.category,
-                                                            "frame_annotations.jgz"), "rb").read().decode("utf8"))
+            dataset = json.loads(
+                gzip.GzipFile(
+                    os.path.join(
+                        self.data_root, self.category, "frame_annotations.jgz"
+                    ),
+                    "rb",
+                )
+                .read()
+                .decode("utf8")
+            )
             for data in dataset:
                 sequences[data["sequence_name"]].append(data)
             seq_data = sequences[self.seq_name]
@@ -209,15 +231,15 @@ class GaussianTrainer(object):
             if self.model_cfg.eval:
                 sample_rate = 8
                 ids = np.arange(len(seq_data))
-                self.i_test = ids[int(sample_rate/2)::sample_rate]
-                self.i_train = np.array(
-                    [i for i in ids if i not in self.i_test])
-                train_cam_infos = [c for idx, c in enumerate(
-                    seq_data) if idx in self.i_train]
-                test_cam_infos = [c for idx, c in enumerate(
-                    seq_data) if idx in self.i_test]
-                train_image_names = [c["image"]["path"]
-                                     for c in train_cam_infos]
+                self.i_test = ids[int(sample_rate / 2) :: sample_rate]
+                self.i_train = np.array([i for i in ids if i not in self.i_test])
+                train_cam_infos = [
+                    c for idx, c in enumerate(seq_data) if idx in self.i_train
+                ]
+                test_cam_infos = [
+                    c for idx, c in enumerate(seq_data) if idx in self.i_test
+                ]
+                train_image_names = [c["image"]["path"] for c in train_cam_infos]
                 test_image_names = [c["image"]["path"] for c in test_cam_infos]
                 print("Train images: ", len(train_image_names))
                 print(train_image_names)
@@ -232,7 +254,9 @@ class GaussianTrainer(object):
             self.seq_len = len(self.data)
         elif self.model_cfg.data_type == "custom":
             source_path = self.model_cfg.source_path
-            cameras_intrinsic_file = os.path.join(source_path, "sparse/0", "cameras.bin")
+            cameras_intrinsic_file = os.path.join(
+                source_path, "sparse/0", "cameras.bin"
+            )
             max_frames = 300
             # if os.path.exists(cameras_intrinsic_file):
             #     images = sorted(glob.glob(os.path.join(source_path, "images", "*.jpg")))
@@ -262,7 +286,12 @@ class GaussianTrainer(object):
                 height = intr.height
                 width = intr.width
                 intr_mat = np.array(
-                    [[focal_length_x, 0, width/2], [0, focal_length_y, height/2], [0, 0, 1]])
+                    [
+                        [focal_length_x, 0, width / 2],
+                        [0, focal_length_y, height / 2],
+                        [0, 0, 1],
+                    ]
+                )
             else:
                 # use some hardcoded values
                 fov = 79.0
@@ -276,14 +305,13 @@ class GaussianTrainer(object):
             if min(width, height) > 1000:
                 width = width // 2
                 height = height // 2
-            
+
             intr_mat[:2, :] /= 2
             self.intrinsic = intr_mat
 
-
             sample_rate = 8
             ids = np.arange(len(images))
-            self.i_test = ids[int(sample_rate/2)::sample_rate]
+            self.i_test = ids[int(sample_rate / 2) :: sample_rate]
             self.i_train = np.array([i for i in ids if i not in self.i_test])
             if "eval" in self.model_cfg.mode:
                 self.data = [images[i] for i in self.i_test]
@@ -303,7 +331,7 @@ class GaussianTrainer(object):
             # sample_rate = 8
             sample_rate = 2 if "Family" in source_path else 8
             ids = np.arange(len(all_views))
-            self.i_test = ids[int(sample_rate/2)::sample_rate]
+            self.i_test = ids[int(sample_rate / 2) :: sample_rate]
             self.i_train = np.array([i for i in ids if i not in self.i_test])
             if "eval" in self.model_cfg.mode:
                 # if self.model_cfg.eval_pose or self.model_cfg.eval_nvs:
@@ -331,17 +359,27 @@ class GaussianTrainer(object):
     def setup_optimizer(self, optim_cfg):
         pass
 
-    def prepare_data_co3d(self, idx, down_sample=True,
-                          orthogonal=True, learn_pose=False,
-                          pose=None, load_depth=True,
-                          load_gt=False):
+    def prepare_data_co3d(
+        self,
+        idx,
+        down_sample=True,
+        orthogonal=True,
+        learn_pose=False,
+        pose=None,
+        load_depth=True,
+        load_gt=False,
+    ):
         cam_info = dict()
         image_name = self.data[idx]["image"]["path"]
         image_path = os.path.join(self.data_root, image_name)
         mask_name = self.data[idx]["mask"]["path"]
         mask_path = os.path.join(self.data_root, mask_name)
-        mask = torch.from_numpy(np.asarray(Image.open(mask_path))
-                                / 255.0).unsqueeze(0).repeat(3, 1, 1).float()
+        mask = (
+            torch.from_numpy(np.asarray(Image.open(mask_path)) / 255.0)
+            .unsqueeze(0)
+            .repeat(3, 1, 1)
+            .float()
+        )
         mask = mask > 0.5
         if not self.use_mask:
             mask = None
@@ -388,11 +426,10 @@ class GaussianTrainer(object):
             depth_tensor = torch.ones((h, w))
             self.mono_depth[idx] = depth_tensor.cuda()
 
-        intr_mat_tensor = torch.from_numpy(
-            intr_mat).float().to(depth_tensor.device)
-        pts = depth_to_3d(depth_tensor[None, None],
-                          intr_mat_tensor[None],
-                          normalize_points=False)
+        intr_mat_tensor = torch.from_numpy(intr_mat).float().to(depth_tensor.device)
+        pts = depth_to_3d(
+            depth_tensor[None, None], intr_mat_tensor[None], normalize_points=False
+        )
 
         points = pts[0].permute(1, 2, 0).cpu().reshape(-1, 3)
         if not orthogonal:
@@ -401,12 +438,22 @@ class GaussianTrainer(object):
         points = points.numpy()
 
         colors = np.asarray(image).reshape(-1, 3) / 255.0
-        colors_torch = torch.from_numpy(np.asarray(
-            image) / 255.0).permute(2, 0, 1).float()
-        viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, colors_torch,
-                                  gt_alpha_mask=mask, image_name=image_name,
-                                  intrinsics=intr_mat,
-                                  uid=idx, is_co3d=True)
+        colors_torch = (
+            torch.from_numpy(np.asarray(image) / 255.0).permute(2, 0, 1).float()
+        )
+        viewpoint_camera = Camera(
+            idx,
+            R,
+            t,
+            FoVx,
+            FoVy,
+            colors_torch,
+            gt_alpha_mask=mask,
+            image_name=image_name,
+            intrinsics=intr_mat,
+            uid=idx,
+            is_co3d=True,
+        )
         pcd_data = o3d.geometry.PointCloud()
         pcd_data.points = o3d.utility.Vector3dVector(points)
         pcd_data.colors = o3d.utility.Vector3dVector(colors)
@@ -422,14 +469,20 @@ class GaussianTrainer(object):
 
         return cam_info, pcd, viewpoint_camera
 
-    def prepare_data_from_viewpoint(self, idx, down_sample=True,
-                                    orthogonal=True, pose=None,
-                                    load_depth=True, **kwargs):
+    def prepare_data_from_viewpoint(
+        self,
+        idx,
+        down_sample=True,
+        orthogonal=True,
+        pose=None,
+        load_depth=True,
+        **kwargs,
+    ):
         viewpoint_camera = copy(self.data[idx])
         image_name = viewpoint_camera.image_name
         intrinsics = viewpoint_camera.intrinsics
         uid = viewpoint_camera.uid
-        if getattr(viewpoint_camera, 'original_image', None) is not None:
+        if getattr(viewpoint_camera, "original_image", None) is not None:
             R = viewpoint_camera.R.transpose()
             t = viewpoint_camera.T
             FoVx = viewpoint_camera.FoVx
@@ -448,8 +501,7 @@ class GaussianTrainer(object):
             mask = None
             image_pil = Image.open(viewpoint_camera.image_path).convert("RGB")
             image_np = np.asarray(image_pil) / 255.0
-            image_torch = torch.from_numpy(
-                image_np).permute(2, 0, 1).float()
+            image_torch = torch.from_numpy(image_np).permute(2, 0, 1).float()
             w, h = viewpoint_camera.width, viewpoint_camera.height
 
         cam_info = {}
@@ -486,18 +538,26 @@ class GaussianTrainer(object):
             depth_tensor = torch.ones((h, w))
             self.mono_depth[idx] = depth_tensor.cuda()
 
-        intr_mat_tensor = torch.from_numpy(
-            intrinsics).float().to(depth_tensor.device)
-        pts = depth_to_3d(depth_tensor[None, None],
-                          intr_mat_tensor[None],
-                          normalize_points=False)
+        intr_mat_tensor = torch.from_numpy(intrinsics).float().to(depth_tensor.device)
+        pts = depth_to_3d(
+            depth_tensor[None, None], intr_mat_tensor[None], normalize_points=False
+        )
 
         points = pts[0].permute(1, 2, 0).cpu().numpy().reshape(-1, 3)
 
-        viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, image_torch,
-                                  gt_alpha_mask=mask, image_name=image_name,
-                                  intrinsics=intrinsics,
-                                  uid=idx, is_co3d=True)
+        viewpoint_camera = Camera(
+            idx,
+            R,
+            t,
+            FoVx,
+            FoVy,
+            image_torch,
+            gt_alpha_mask=mask,
+            image_name=image_name,
+            intrinsics=intrinsics,
+            uid=idx,
+            is_co3d=True,
+        )
 
         pcd_data = o3d.geometry.PointCloud()
         pcd_data.points = o3d.utility.Vector3dVector(points)
@@ -513,9 +573,15 @@ class GaussianTrainer(object):
 
         return cam_info, pcd, viewpoint_camera
 
-    def prepare_custom_data(self, idx, down_sample=True,
-                            orthogonal=True, pose=None,
-                            load_depth=True, **kwargs):
+    def prepare_custom_data(
+        self,
+        idx,
+        down_sample=True,
+        orthogonal=True,
+        pose=None,
+        load_depth=True,
+        **kwargs,
+    ):
         image_name = self.data[idx]
         intrinsics = self.intrinsic
         uid = idx
@@ -524,11 +590,15 @@ class GaussianTrainer(object):
         width, height = original_image.size
         if min(width, height) > 1000:
             original_image = original_image.resize(
-                (width // 2, height // 2), Image.LANCZOS)
+                (width // 2, height // 2), Image.LANCZOS
+            )
             width, height = original_image.size
         image_np = np.asarray(original_image) / 255.0
-        color_torch = torch.from_numpy(np.asarray(
-            original_image) / 255.0).permute(2, 0, 1).float()
+        color_torch = (
+            torch.from_numpy(np.asarray(original_image) / 255.0)
+            .permute(2, 0, 1)
+            .float()
+        )
         if orthogonal:
             R = np.eye(3)
             t = np.zeros(3)
@@ -543,7 +613,6 @@ class GaussianTrainer(object):
         FoVy = focal2fov(focal_length_y, height)
         FoVx = focal2fov(focal_length_x, width)
 
-        
         cam_info = {}
         pose_src = np.eye(4)
         cam_info["gt_pose"] = copy(pose_src)
@@ -553,7 +622,6 @@ class GaussianTrainer(object):
         cam_info["FoVy"] = FoVy
         cam_info["R"] = R
         cam_info["t"] = t
-
 
         if load_depth:
             if idx not in self.mono_depth:
@@ -568,18 +636,26 @@ class GaussianTrainer(object):
             depth_tensor = torch.ones((h, w))
             self.mono_depth[idx] = depth_tensor.cuda()
 
-        intr_mat_tensor = torch.from_numpy(
-            intrinsics).float().to(depth_tensor.device)
-        pts = depth_to_3d(depth_tensor[None, None],
-                          intr_mat_tensor[None],
-                          normalize_points=False)
+        intr_mat_tensor = torch.from_numpy(intrinsics).float().to(depth_tensor.device)
+        pts = depth_to_3d(
+            depth_tensor[None, None], intr_mat_tensor[None], normalize_points=False
+        )
 
         points = pts[0].permute(1, 2, 0).cpu().numpy().reshape(-1, 3)
 
-        viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, color_torch,
-                                gt_alpha_mask=None, image_name=image_name,
-                                intrinsics=self.intrinsic,
-                                uid=idx, is_co3d=True)
+        viewpoint_camera = Camera(
+            idx,
+            R,
+            t,
+            FoVx,
+            FoVy,
+            color_torch,
+            gt_alpha_mask=None,
+            image_name=image_name,
+            intrinsics=self.intrinsic,
+            uid=idx,
+            is_co3d=True,
+        )
 
         pcd_data = o3d.geometry.PointCloud()
         pcd_data.points = o3d.utility.Vector3dVector(points)
@@ -587,7 +663,7 @@ class GaussianTrainer(object):
         pcd_data.estimate_normals()
         if down_sample:
             voxel_size = 0.01
-            while len(pcd_data.points)> 1_000_000:
+            while len(pcd_data.points) > 1_000_000:
                 pcd_data = pcd_data.voxel_down_sample(voxel_size=voxel_size)
                 voxel_size *= 5
 
@@ -598,26 +674,42 @@ class GaussianTrainer(object):
 
         return cam_info, pcd, viewpoint_camera
 
-
-    def prepare_data(self, idx, down_sample=True,
-                     orthogonal=True, learn_pose=False,
-                     pose=None, load_depth=True,
-                     load_gt=False):
+    def prepare_data(
+        self,
+        idx,
+        down_sample=True,
+        orthogonal=True,
+        learn_pose=False,
+        pose=None,
+        load_depth=True,
+        load_gt=False,
+    ):
         if self.data_type == "co3d":
-            return self.prepare_data_co3d(idx, down_sample=down_sample,
-                                          orthogonal=orthogonal, learn_pose=learn_pose,
-                                          pose=pose, load_depth=load_depth,
-                                          load_gt=load_gt)
+            return self.prepare_data_co3d(
+                idx,
+                down_sample=down_sample,
+                orthogonal=orthogonal,
+                learn_pose=learn_pose,
+                pose=pose,
+                load_depth=load_depth,
+                load_gt=load_gt,
+            )
         elif self.data_type == "custom":
-            return self.prepare_custom_data(idx, down_sample=down_sample,
-                                            orthogonal=orthogonal,
-                                            pose=pose,
-                                            load_depth=load_depth)
+            return self.prepare_custom_data(
+                idx,
+                down_sample=down_sample,
+                orthogonal=orthogonal,
+                pose=pose,
+                load_depth=load_depth,
+            )
         else:
-            return self.prepare_data_from_viewpoint(idx, down_sample=down_sample,
-                                                    orthogonal=orthogonal,
-                                                    pose=pose,
-                                                    load_depth=load_depth)
+            return self.prepare_data_from_viewpoint(
+                idx,
+                down_sample=down_sample,
+                orthogonal=orthogonal,
+                pose=pose,
+                load_depth=load_depth,
+            )
 
     def load_viewpoint_cam(self, idx, pose=None, load_depth=False):
         if self.data_type == "co3d":
@@ -636,12 +728,22 @@ class GaussianTrainer(object):
             else:
                 image = self.rgb_images[idx]
             w, h = image.size
-            colors_torch = torch.from_numpy(np.asarray(
-                image) / 255.0).permute(2, 0, 1).float()
-            viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, colors_torch,
-                                      gt_alpha_mask=None, image_name=image_name,
-                                      intrinsics=intr_mat,
-                                      uid=idx, is_co3d=True)
+            colors_torch = (
+                torch.from_numpy(np.asarray(image) / 255.0).permute(2, 0, 1).float()
+            )
+            viewpoint_camera = Camera(
+                idx,
+                R,
+                t,
+                FoVx,
+                FoVy,
+                colors_torch,
+                gt_alpha_mask=None,
+                image_name=image_name,
+                intrinsics=intr_mat,
+                uid=idx,
+                is_co3d=True,
+            )
 
             if load_depth:
                 if idx not in self.mono_depth:
@@ -655,10 +757,14 @@ class GaussianTrainer(object):
             width, height = original_image.size
             if min(width, height) > 1000:
                 original_image = original_image.resize(
-                    (width // 2, height // 2), Image.LANCZOS)
+                    (width // 2, height // 2), Image.LANCZOS
+                )
                 width, height = original_image.size
-            color_torch = torch.from_numpy(np.asarray(
-                original_image) / 255.0).permute(2, 0, 1).float()
+            color_torch = (
+                torch.from_numpy(np.asarray(original_image) / 255.0)
+                .permute(2, 0, 1)
+                .float()
+            )
             if pose is None:
                 R = np.eye(3)
                 t = np.zeros(3)
@@ -669,17 +775,26 @@ class GaussianTrainer(object):
             focal_length_y = self.intrinsic[1, 1]
             FoVy = focal2fov(focal_length_y, height)
             FoVx = focal2fov(focal_length_x, width)
-            viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, color_torch,
-                                    gt_alpha_mask=None, image_name=image_name,
-                                    intrinsics=self.intrinsic,
-                                    uid=idx, is_co3d=True)
+            viewpoint_camera = Camera(
+                idx,
+                R,
+                t,
+                FoVx,
+                FoVy,
+                color_torch,
+                gt_alpha_mask=None,
+                image_name=image_name,
+                intrinsics=self.intrinsic,
+                uid=idx,
+                is_co3d=True,
+            )
             if load_depth:
                 if idx not in self.mono_depth:
                     depth_tensor = self.predict_depth(np.asarray(original_image))
                     self.mono_depth[idx] = depth_tensor.cuda()
         else:
             viewpoint_camera = copy(self.data[idx])
-            if getattr(viewpoint_camera, 'original_image', None) is not None:
+            if getattr(viewpoint_camera, "original_image", None) is not None:
                 R = viewpoint_camera.R.transpose()
                 t = viewpoint_camera.T
                 FoVx = viewpoint_camera.FoVx
@@ -689,19 +804,22 @@ class GaussianTrainer(object):
                 uid = viewpoint_camera.uid
                 mask = viewpoint_camera.gt_alpha_mask
                 original_image = viewpoint_camera.original_image
-                image_pil = Image.fromarray((original_image.permute(
-                    1, 2, 0).cpu().numpy() * 255).astype(np.uint8))
+                image_pil = Image.fromarray(
+                    (original_image.permute(1, 2, 0).cpu().numpy() * 255).astype(
+                        np.uint8
+                    )
+                )
             else:
                 R = viewpoint_camera.R
                 t = viewpoint_camera.T
                 FoVx = viewpoint_camera.FovX
                 FoVy = viewpoint_camera.FovY
                 mask = None
-                image_pil = Image.open(
-                    viewpoint_camera.image_path).convert("RGB")
+                image_pil = Image.open(viewpoint_camera.image_path).convert("RGB")
                 image_np = np.asarray(image_pil) / 255.0
-                original_image = torch.from_numpy(
-                    image_np).permute(2, 0, 1).float().cuda()
+                original_image = (
+                    torch.from_numpy(image_np).permute(2, 0, 1).float().cuda()
+                )
                 w, h = viewpoint_camera.width, viewpoint_camera.height
                 image_name = viewpoint_camera.image_name
                 intrinsics = viewpoint_camera.intrinsics
@@ -713,10 +831,19 @@ class GaussianTrainer(object):
                 R = pose[:3, :3].numpy()
                 t = pose[:3, 3].numpy()
 
-            viewpoint_camera = Camera(idx, R, t, FoVx, FoVy, original_image,
-                                      gt_alpha_mask=None, image_name=image_name,
-                                      intrinsics=intrinsics,
-                                      uid=idx, is_co3d=True)
+            viewpoint_camera = Camera(
+                idx,
+                R,
+                t,
+                FoVx,
+                FoVy,
+                original_image,
+                gt_alpha_mask=None,
+                image_name=image_name,
+                intrinsics=intrinsics,
+                uid=idx,
+                is_co3d=True,
+            )
 
             if load_depth:
                 if idx not in self.mono_depth:
@@ -727,16 +854,19 @@ class GaussianTrainer(object):
 
         return viewpoint_camera
 
-    def train_step(self, viewpoint_cam,
-                   iteration, background,
-                   pipe, optim_opt, colors_precomp=None):
+    def train_step(
+        self, viewpoint_cam, iteration, background, pipe, optim_opt, colors_precomp=None
+    ):
         # Render
-        render_pkg = render(viewpoint_cam, self.model, pipe, background,
-                            override_color=colors_precomp)
-        image, viewspace_point_tensor, visibility_filter, radii = (render_pkg["render"],
-                                                                   render_pkg["viewspace_points"],
-                                                                   render_pkg["visibility_filter"],
-                                                                   render_pkg["radii"])
+        render_pkg = render(
+            viewpoint_cam, self.model, pipe, background, override_color=colors_precomp
+        )
+        image, viewspace_point_tensor, visibility_filter, radii = (
+            render_pkg["render"],
+            render_pkg["viewspace_points"],
+            render_pkg["visibility_filter"],
+            render_pkg["radii"],
+        )
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
@@ -751,15 +881,26 @@ class GaussianTrainer(object):
 
             if iteration < optim_opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
-                self.model.max_radii2D[visibility_filter] = torch.max(self.model.max_radii2D[visibility_filter],
-                                                                      radii[visibility_filter])
+                self.model.max_radii2D[visibility_filter] = torch.max(
+                    self.model.max_radii2D[visibility_filter], radii[visibility_filter]
+                )
                 self.model.add_densification_stats(
-                    viewspace_point_tensor, visibility_filter)
+                    viewspace_point_tensor, visibility_filter
+                )
 
-                if iteration > optim_opt.densify_from_iter and iteration % optim_opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > optim_opt.opacity_reset_interval else None
-                    self.model.densify_and_prune(optim_opt.densify_grad_threshold, 0.005,
-                                                 self.radius, size_threshold)
+                if (
+                    iteration > optim_opt.densify_from_iter
+                    and iteration % optim_opt.densification_interval == 0
+                ):
+                    size_threshold = (
+                        20 if iteration > optim_opt.opacity_reset_interval else None
+                    )
+                    self.model.densify_and_prune(
+                        optim_opt.densify_grad_threshold,
+                        0.005,
+                        self.radius,
+                        size_threshold,
+                    )
 
                 if iteration % optim_opt.opacity_reset_interval == 0:
                     self.model.reset_opacity()
@@ -775,8 +916,7 @@ class GaussianTrainer(object):
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         if colors_precomp is not None:
             background = torch.zeros_like(colors_precomp[0])
-        progress_bar = tqdm(range(optim_opt.iterations),
-                            desc="Training progress")
+        progress_bar = tqdm(range(optim_opt.iterations), desc="Training progress")
         self.ema_loss_for_log = 0.0
         # self.model.training_setup(optim_opt)
         for iteration in range(1, optim_opt.iterations):
@@ -788,9 +928,14 @@ class GaussianTrainer(object):
                 self.model.oneupSHdegree()
 
             # viewpoint_cam = self.create_viewpoint()
-            loss, rend_dict, psnr_train = self.train_step(viewpoint_cam, iteration,
-                                                          background, pipe, optim_opt,
-                                                          colors_precomp=colors_precomp)
+            loss, rend_dict, psnr_train = self.train_step(
+                viewpoint_cam,
+                iteration,
+                background,
+                pipe,
+                optim_opt,
+                colors_precomp=colors_precomp,
+            )
 
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"PSNR": f"{psnr_train:.{2}f}"})
@@ -798,22 +943,27 @@ class GaussianTrainer(object):
             if iteration == optim_opt.iterations:
                 progress_bar.close()
 
-    def obtain_center_feat(self,):
+    def obtain_center_feat(
+        self,
+    ):
         pass
 
     def visualize(self, render_pkg, filename):
         if "depth" in render_pkg:
             rend_depth = Image.fromarray(
-                colorize(render_pkg["depth"].detach().cpu().numpy(),
-                         cmap='magma_r')).convert("RGB")
+                colorize(render_pkg["depth"].detach().cpu().numpy(), cmap="magma_r")
+            ).convert("RGB")
             rend_depth.save(filename.replace(".png", "_depth.png"))
         if "acc" in render_pkg:
             rend_acc = Image.fromarray(
-                colorize(render_pkg["acc"].detach().cpu().numpy(),
-                         cmap='magma_r')).convert("RGB")
+                colorize(render_pkg["acc"].detach().cpu().numpy(), cmap="magma_r")
+            ).convert("RGB")
             rend_acc.save(filename.replace(".png", "_acc.png"))
 
         rend_img = Image.fromarray(
-            np.asarray(render_pkg["render"].detach().cpu().permute(1,
-                                                                   2, 0).numpy() * 255.0, dtype=np.uint8)).convert("RGB")
+            np.asarray(
+                render_pkg["render"].detach().cpu().permute(1, 2, 0).numpy() * 255.0,
+                dtype=np.uint8,
+            )
+        ).convert("RGB")
         rend_img.save(filename)

@@ -2,7 +2,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE_inria.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -10,54 +10,109 @@
 
 import torch
 
+
 def mse(img1, img2):
     return (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
+
 
 def psnr(img1, img2):
     mse = (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
     return 20 * torch.log10(1.0 / torch.sqrt(mse))
 
+
 import numpy as np
-import matplotlib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+
 class CameraPoseVisualizer:
     def __init__(self, xlim=None, ylim=None, zlim=None):
         self.fig = plt.figure(figsize=(18, 7))
-        self.ax = self.fig.add_subplot(projection='3d')
+        self.ax = self.fig.add_subplot(projection="3d")
         self.ax.set_aspect("auto")
         if xlim is not None and ylim is not None and zlim is not None:
             self.ax.set_xlim(xlim)
             self.ax.set_ylim(ylim)
             self.ax.set_zlim(zlim)
-        
-        self.ax.view_init(elev=10., azim=45)
+
+        self.ax.view_init(elev=10.0, azim=45)
         self.ax.xaxis.set_tick_params(labelbottom=False)
         self.ax.yaxis.set_tick_params(labelleft=False)
         self.ax.zaxis.set_tick_params(labelleft=False)
-        self.ax.set_xlabel('x')
-        self.ax.set_ylabel('y')
-        self.ax.set_zlabel('z')
+        self.ax.set_xlabel("x")
+        self.ax.set_ylabel("y")
+        self.ax.set_zlabel("z")
         # plt.tight_layout()
-        print('initialize camera pose visualizer')
+        print("initialize camera pose visualizer")
 
-    def extrinsic2pyramid(self, extrinsic, color='r', focal_len_scaled=5, aspect_ratio=0.3):
-        vertex_std = np.array([[0, 0, 0, 1],
-                               [focal_len_scaled * aspect_ratio, -focal_len_scaled * aspect_ratio, focal_len_scaled, 1],
-                               [focal_len_scaled * aspect_ratio, focal_len_scaled * aspect_ratio, focal_len_scaled, 1],
-                               [-focal_len_scaled * aspect_ratio, focal_len_scaled * aspect_ratio, focal_len_scaled, 1],
-                               [-focal_len_scaled * aspect_ratio, -focal_len_scaled * aspect_ratio, focal_len_scaled, 1]])
+    def extrinsic2pyramid(
+        self, extrinsic, color="r", focal_len_scaled=5, aspect_ratio=0.3
+    ):
+        vertex_std = np.array(
+            [
+                [0, 0, 0, 1],
+                [
+                    focal_len_scaled * aspect_ratio,
+                    -focal_len_scaled * aspect_ratio,
+                    focal_len_scaled,
+                    1,
+                ],
+                [
+                    focal_len_scaled * aspect_ratio,
+                    focal_len_scaled * aspect_ratio,
+                    focal_len_scaled,
+                    1,
+                ],
+                [
+                    -focal_len_scaled * aspect_ratio,
+                    focal_len_scaled * aspect_ratio,
+                    focal_len_scaled,
+                    1,
+                ],
+                [
+                    -focal_len_scaled * aspect_ratio,
+                    -focal_len_scaled * aspect_ratio,
+                    focal_len_scaled,
+                    1,
+                ],
+            ]
+        )
         vertex_transformed = vertex_std @ extrinsic.T
-        meshes = [[vertex_transformed[0, :-1], vertex_transformed[1][:-1], vertex_transformed[2, :-1]],
-                            [vertex_transformed[0, :-1], vertex_transformed[2, :-1], vertex_transformed[3, :-1]],
-                            [vertex_transformed[0, :-1], vertex_transformed[3, :-1], vertex_transformed[4, :-1]],
-                            [vertex_transformed[0, :-1], vertex_transformed[4, :-1], vertex_transformed[1, :-1]],
-                            [vertex_transformed[1, :-1], vertex_transformed[2, :-1], vertex_transformed[3, :-1], vertex_transformed[4, :-1]]]
+        meshes = [
+            [
+                vertex_transformed[0, :-1],
+                vertex_transformed[1][:-1],
+                vertex_transformed[2, :-1],
+            ],
+            [
+                vertex_transformed[0, :-1],
+                vertex_transformed[2, :-1],
+                vertex_transformed[3, :-1],
+            ],
+            [
+                vertex_transformed[0, :-1],
+                vertex_transformed[3, :-1],
+                vertex_transformed[4, :-1],
+            ],
+            [
+                vertex_transformed[0, :-1],
+                vertex_transformed[4, :-1],
+                vertex_transformed[1, :-1],
+            ],
+            [
+                vertex_transformed[1, :-1],
+                vertex_transformed[2, :-1],
+                vertex_transformed[3, :-1],
+                vertex_transformed[4, :-1],
+            ],
+        ]
         self.ax.add_collection3d(
-            Poly3DCollection(meshes, facecolors=color, linewidths=0.3, edgecolors=color, alpha=0.35))
+            Poly3DCollection(
+                meshes, facecolors=color, linewidths=0.3, edgecolors=color, alpha=0.35
+            )
+        )
 
     def customize_legend(self, list_label):
         list_handle = []
@@ -65,29 +120,43 @@ class CameraPoseVisualizer:
             color = plt.cm.rainbow(idx / len(list_label))
             patch = Patch(color=color, label=label)
             list_handle.append(patch)
-        plt.legend(loc='right', bbox_to_anchor=(1.8, 0.5), handles=list_handle)
+        plt.legend(loc="right", bbox_to_anchor=(1.8, 0.5), handles=list_handle)
 
     def colorbar(self, max_frame_length):
         cmap = mpl.cm.rainbow
         norm = mpl.colors.Normalize(vmin=0, vmax=max_frame_length)
-        self.fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), orientation='vertical', label='Frame Number')
+        self.fig.colorbar(
+            mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
+            orientation="vertical",
+            label="Frame Number",
+        )
 
     def show(self):
-        plt.title('Extrinsic Parameters')
+        plt.title("Extrinsic Parameters")
         plt.show()
-    
-    def add_traj(self, poses, c='r', alpha=0.5):
+
+    def add_traj(self, poses, c="r", alpha=0.5):
         x = [float(pose[0, 3]) for pose in poses]
         y = [float(pose[1, 3]) for pose in poses]
         z = [float(pose[2, 3]) for pose in poses]
-        self.ax.plot(x,y,z, c=c, alpha=alpha)
+        self.ax.plot(x, y, z, c=c, alpha=alpha)
 
     def save(self, path):
         plt.tight_layout()
-        self.fig.savefig(path, bbox_inches='tight')
+        self.fig.savefig(path, bbox_inches="tight")
 
 
-def colorize(value, vmin=None, vmax=None, cmap='gray_r', invalid_val=-99, invalid_mask=None, background_color=(128, 128, 128, 255), gamma_corrected=False, value_transform=None):
+def colorize(
+    value,
+    vmin=None,
+    vmax=None,
+    cmap="gray_r",
+    invalid_val=-99,
+    invalid_mask=None,
+    background_color=(128, 128, 128, 255),
+    gamma_corrected=False,
+    value_transform=None,
+):
     """Converts a depth map to a color image.
 
     Args:
@@ -113,13 +182,13 @@ def colorize(value, vmin=None, vmax=None, cmap='gray_r', invalid_val=-99, invali
     mask = np.logical_not(invalid_mask)
 
     # normalize
-    vmin = np.percentile(value[mask],2) if vmin is None else vmin
-    vmax = np.percentile(value[mask],85) if vmax is None else vmax
+    vmin = np.percentile(value[mask], 2) if vmin is None else vmin
+    vmax = np.percentile(value[mask], 85) if vmax is None else vmax
     if vmin != vmax:
         value = (value - vmin) / (vmax - vmin)  # vmin..vmax
     else:
         # Avoid 0-division
-        value = value * 0.
+        value = value * 0.0
 
     # squeeze last dim if it exists
     # grey out the invalid values
@@ -145,7 +214,6 @@ def colorize(value, vmin=None, vmax=None, cmap='gray_r', invalid_val=-99, invali
     return img
 
 
-
 def cm_prune(x_):
     """Custom colormap to visualize pruning"""
     if isinstance(x_, torch.Tensor):
@@ -153,4 +221,3 @@ def cm_prune(x_):
     max_i = max(x_)
     norm_x = np.where(x_ == max_i, -1, (x_ - 1) / 9)
     return cm_BlRdGn(norm_x)
-

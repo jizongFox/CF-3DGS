@@ -6,16 +6,12 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import torch
-from torch import nn
-from torch.nn import functional as F
-from torch.autograd import Variable
-
-import numpy as np
 from math import exp
 
-
-import pdb
+import torch
+from torch import nn
+from torch.autograd import Variable
+from torch.nn import functional as F
 
 
 class Loss_Eval(nn.Module):
@@ -24,9 +20,7 @@ class Loss_Eval(nn.Module):
 
     def forward(self, rgb_pred, rgb_gt):
         loss = F.mse_loss(rgb_pred, rgb_gt)
-        return_dict = {
-            'loss': loss
-        }
+        return_dict = {"loss": loss}
         return return_dict
 
 
@@ -36,21 +30,20 @@ class Loss(nn.Module):
 
         self.depth_loss_type = cfg.depth_loss_type
 
-        self.l1_loss = nn.L1Loss(reduction='sum')
-        self.l2_loss = nn.MSELoss(reduction='sum')
-        self.scale_inv_loss = ScaleAndShiftInvariantLoss(alpha=0.5,
-                                                         scales=1)
+        self.l1_loss = nn.L1Loss(reduction="sum")
+        self.l2_loss = nn.MSELoss(reduction="sum")
+        self.scale_inv_loss = ScaleAndShiftInvariantLoss(alpha=0.5, scales=1)
 
         # ssim_loss = ssim
         self.ssim_loss = SSIM_V2()
 
         self.cfg = cfg
 
-    def get_rgb_full_loss(self, rgb_values, rgb_gt, rgb_loss_type='l2'):
+    def get_rgb_full_loss(self, rgb_values, rgb_gt, rgb_loss_type="l2"):
         num_pixels = rgb_values.shape[1] * rgb_values.shape[2]
-        if rgb_loss_type == 'l1':
+        if rgb_loss_type == "l1":
             rgb_loss = self.l1_loss(rgb_values, rgb_gt) / float(num_pixels)
-        elif rgb_loss_type == 'l2':
+        elif rgb_loss_type == "l2":
             rgb_loss = self.l2_loss(rgb_values, rgb_gt) / float(num_pixels)
         return rgb_loss
 
@@ -71,7 +64,7 @@ class Loss(nn.Module):
         gt_depth_n = (gt_depth - t_gt) / s_gt
 
         if weight is not None:
-            loss = F.mse_loss(pred_depth_n, gt_depth_n, reduction='none')
+            loss = F.mse_loss(pred_depth_n, gt_depth_n, reduction="none")
             loss = loss * weight
             loss = loss.sum() / (weight.sum() + 1e-8)
         else:
@@ -85,18 +78,23 @@ class Loss(nn.Module):
 
     def get_depth_loss(self, depth_pred, depth_gt):
         num_pixels = depth_pred.shape[0] * depth_pred.shape[1]
-        if self.depth_loss_type == 'l1':
+        if self.depth_loss_type == "l1":
             loss = self.l1_loss(depth_pred, depth_gt) / float(num_pixels)
-        elif self.depth_loss_type == 'invariant':
+        elif self.depth_loss_type == "invariant":
             # loss = self.depth_loss_dpt(1.0/depth_pred, 1.0/depth_gt)
             mask = (depth_gt > 0.02).float()
-            loss = self.scale_inv_loss(
-                depth_pred[None], depth_gt[None], mask[None])
+            loss = self.scale_inv_loss(depth_pred[None], depth_gt[None], mask[None])
         return loss
 
-
-    def forward(self, rgb_pred, rgb_gt, depth_pred=None, depth_gt=None,
-                rgb_loss_type='l1', **kwargs):
+    def forward(
+        self,
+        rgb_pred,
+        rgb_gt,
+        depth_pred=None,
+        depth_gt=None,
+        rgb_loss_type="l1",
+        **kwargs
+    ):
 
         rgb_gt = rgb_gt.cuda()
 
@@ -115,22 +113,20 @@ class Loss(nn.Module):
             depth_gt = depth_gt.cuda()
             depth_pred[depth_pred < 0.02] = 0.02
             depth_pred[depth_pred > 20.0] = 20.0
-            depth_loss = self.get_depth_loss(
-                depth_pred.squeeze(), depth_gt.squeeze())
+            depth_loss = self.get_depth_loss(depth_pred.squeeze(), depth_gt.squeeze())
         else:
             depth_loss = torch.tensor(0.0).cuda().float()
 
-        loss = rgb_full_loss + lambda_dssim * dssim_loss +\
-            lambda_depth * depth_loss
+        loss = rgb_full_loss + lambda_dssim * dssim_loss + lambda_depth * depth_loss
 
         if torch.isnan(loss):
             breakpoint()
 
         return_dict = {
-            'loss': loss,
-            'loss_rgb': rgb_full_loss,
-            'loss_dssim': dssim_loss,
-            'loss_depth': depth_loss,
+            "loss": loss,
+            "loss_rgb": rgb_full_loss,
+            "loss_dssim": dssim_loss,
+            "loss_depth": depth_loss,
         }
 
         return return_dict
@@ -145,25 +141,25 @@ def l2_loss(network_output, gt):
 
 
 def gaussian(window_size, sigma):
-    gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 /
-                         float(2 * sigma ** 2)) for x in range(window_size)])
+    gauss = torch.Tensor(
+        [
+            exp(-((x - window_size // 2) ** 2) / float(2 * sigma ** 2))
+            for x in range(window_size)
+        ]
+    )
     return gauss / gauss.sum()
 
 
 def create_window(window_size, channel):
     _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
-    _2D_window = _1D_window.mm(
-        _1D_window.t()).float().unsqueeze(0).unsqueeze(0)
-    window = Variable(_2D_window.expand(
-        channel, 1, window_size, window_size).contiguous())
+    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
+    window = Variable(
+        _2D_window.expand(channel, 1, window_size, window_size).contiguous()
+    )
     return window
 
 
-
-
-def _ssim(
-    img1, img2, window, window_size, channel, mask=None, size_average=True
-):
+def _ssim(img1, img2, window, window_size, channel, mask=None, size_average=True):
     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
 
@@ -172,12 +168,10 @@ def _ssim(
     mu1_mu2 = mu1 * mu2
 
     sigma1_sq = (
-        F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel)
-        - mu1_sq
+        F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel) - mu1_sq
     )
     sigma2_sq = (
-        F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel)
-        - mu2_sq
+        F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel) - mu2_sq
     )
     sigma12 = (
         F.conv2d(img1 * img2, window, padding=window_size // 2, groups=channel)
@@ -194,9 +188,9 @@ def _ssim(
     if not (mask is None):
         b = mask.size(0)
         ssim_map = ssim_map.mean(dim=1, keepdim=True) * mask
-        ssim_map = ssim_map.view(b, -1).sum(dim=1) / mask.view(b, -1).sum(
-            dim=1
-        ).clamp(min=1)
+        ssim_map = ssim_map.view(b, -1).sum(dim=1) / mask.view(b, -1).sum(dim=1).clamp(
+            min=1
+        )
         return ssim_map
 
     # import pdb
@@ -225,10 +219,7 @@ class SSIM_V2(torch.nn.Module):
 
         (_, channel, _, _) = img1.size()
 
-        if (
-            channel == self.channel
-            and self.window.data.type() == img1.data.type()
-        ):
+        if channel == self.channel and self.window.data.type() == img1.data.type():
             window = self.window
         else:
             window = create_window(self.window_size, channel)
@@ -251,10 +242,6 @@ class SSIM_V2(torch.nn.Module):
         )
 
 
-
-
-
-
 # copy from MiDaS and MonoSDF
 def compute_scale_and_shift(prediction, target, mask):
     # system matrix: A = [[a_00, a_01], [a_10, a_11]]
@@ -273,10 +260,8 @@ def compute_scale_and_shift(prediction, target, mask):
     det = a_00 * a_11 - a_01 * a_01
     valid = det.nonzero()
 
-    x_0[valid] = (a_11[valid] * b_0[valid] -
-                  a_01[valid] * b_1[valid]) / det[valid]
-    x_1[valid] = (-a_01[valid] * b_0[valid] +
-                  a_00[valid] * b_1[valid]) / det[valid]
+    x_0[valid] = (a_11[valid] * b_0[valid] - a_01[valid] * b_1[valid]) / det[valid]
+    x_1[valid] = (-a_01[valid] * b_0[valid] + a_00[valid] * b_1[valid]) / det[valid]
 
     return x_0, x_1
 
@@ -305,7 +290,6 @@ def reduction_image_based(image_loss, M):
 
 
 def mse_loss(prediction, target, mask, reduction=reduction_batch_based):
-
     M = torch.sum(mask, (1, 2))
     res = prediction - target
     image_loss = torch.sum(mask * res * res, (1, 2))
@@ -314,7 +298,6 @@ def mse_loss(prediction, target, mask, reduction=reduction_batch_based):
 
 
 def gradient_loss(prediction, target, mask, reduction=reduction_batch_based):
-
     M = torch.sum(mask, (1, 2))
 
     diff = prediction - target
@@ -334,10 +317,10 @@ def gradient_loss(prediction, target, mask, reduction=reduction_batch_based):
 
 
 class MSELoss(nn.Module):
-    def __init__(self, reduction='batch-based'):
+    def __init__(self, reduction="batch-based"):
         super().__init__()
 
-        if reduction == 'batch-based':
+        if reduction == "batch-based":
             self.__reduction = reduction_batch_based
         else:
             self.__reduction = reduction_image_based
@@ -347,10 +330,10 @@ class MSELoss(nn.Module):
 
 
 class GradientLoss(nn.Module):
-    def __init__(self, scales=4, reduction='batch-based'):
+    def __init__(self, scales=4, reduction="batch-based"):
         super().__init__()
 
-        if reduction == 'batch-based':
+        if reduction == "batch-based":
             self.__reduction = reduction_batch_based
         else:
             self.__reduction = reduction_image_based
@@ -363,32 +346,35 @@ class GradientLoss(nn.Module):
         for scale in range(self.__scales):
             step = pow(2, scale)
 
-            total += gradient_loss(prediction[:, ::step, ::step], target[:, ::step, ::step],
-                                   mask[:, ::step, ::step], reduction=self.__reduction)
+            total += gradient_loss(
+                prediction[:, ::step, ::step],
+                target[:, ::step, ::step],
+                mask[:, ::step, ::step],
+                reduction=self.__reduction,
+            )
 
         return total
 
 
 class ScaleAndShiftInvariantLoss(nn.Module):
-    def __init__(self, alpha=0.5, scales=4, reduction='batch-based'):
+    def __init__(self, alpha=0.5, scales=4, reduction="batch-based"):
         super().__init__()
 
         self.__data_loss = MSELoss(reduction=reduction)
-        self.__regularization_loss = GradientLoss(
-            scales=scales, reduction=reduction)
+        self.__regularization_loss = GradientLoss(scales=scales, reduction=reduction)
         self.__alpha = alpha
 
         self.__prediction_ssi = None
 
     def forward(self, prediction, target, mask):
         scale, shift = compute_scale_and_shift(prediction, target, mask)
-        self.__prediction_ssi = scale.view(-1, 1, 1) * \
-            prediction + shift.view(-1, 1, 1)
+        self.__prediction_ssi = scale.view(-1, 1, 1) * prediction + shift.view(-1, 1, 1)
 
         total = self.__data_loss(self.__prediction_ssi, target, mask)
         if self.__alpha > 0:
-            total += self.__alpha * \
-                self.__regularization_loss(self.__prediction_ssi, target, mask)
+            total += self.__alpha * self.__regularization_loss(
+                self.__prediction_ssi, target, mask
+            )
 
         return total
 

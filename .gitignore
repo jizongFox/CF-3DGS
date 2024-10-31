@@ -24,3 +24,6 @@ wandb/
 *.mp4
 *.ipynb_checkpoints
 *.ipynb
+venv
+.idea
+.vscode

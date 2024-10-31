@@ -9,9 +9,9 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from argparse import ArgumentParser, Namespace
-import sys
 import os
+import sys
+from argparse import ArgumentParser, Namespace
 
 
 class GroupParams:
@@ -31,14 +31,15 @@ class ParamGroup:
             if shorthand:
                 if t == bool:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, action="store_true")
+                        "--" + key, ("-" + key[0:1]), default=value, action="store_true"
+                    )
                 else:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, type=t)
+                        "--" + key, ("-" + key[0:1]), default=value, type=t
+                    )
             else:
                 if t == bool:
-                    group.add_argument(
-                        "--" + key, default=value, action="store_true")
+                    group.add_argument("--" + key, default=value, action="store_true")
                 else:
                     group.add_argument("--" + key, default=value, type=t)
 

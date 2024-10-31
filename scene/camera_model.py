@@ -6,10 +6,12 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from lietorch import SO3, SE3
+from lietorch import SE3
+
+
 class CameraModel(nn.Module):
     def __init__(self, num_cams, pose_dim=9, init_pose=None):
         """
@@ -20,15 +22,14 @@ class CameraModel(nn.Module):
         :param init_c2w: (N, 4, 4) torch tensor
         """
         super(CameraModel, self).__init__()
-        self.register_buffer('init_pose', init_pose)
+        self.register_buffer("init_pose", init_pose)
 
         img_emb_dim = 1
         pose_dim = 9
         self.img_embedding = nn.Embedding(num_cams, img_emb_dim)
         self.cam_mlp = nn.Sequential(
-                        nn.Linear(img_emb_dim+pose_dim, 32),
-                        nn.ReLU(),
-                        nn.Linear(32, pose_dim))
+            nn.Linear(img_emb_dim + pose_dim, 32), nn.ReLU(), nn.Linear(32, pose_dim)
+        )
         self.factor = 0.01
 
     def forward(self, cam_id):
@@ -48,11 +49,12 @@ def vec2skew(v):
     :return:   (3, 3)
     """
     zero = torch.zeros(1, dtype=torch.float32, device=v.device)
-    skew_v0 = torch.cat([ zero,    -v[2:3],   v[1:2]])  # (3, 1)
-    skew_v1 = torch.cat([ v[2:3],   zero,    -v[0:1]])
-    skew_v2 = torch.cat([-v[1:2],   v[0:1],   zero])
+    skew_v0 = torch.cat([zero, -v[2:3], v[1:2]])  # (3, 1)
+    skew_v1 = torch.cat([v[2:3], zero, -v[0:1]])
+    skew_v2 = torch.cat([-v[1:2], v[0:1], zero])
     skew_v = torch.stack([skew_v0, skew_v1, skew_v2], dim=0)  # (3, 3)
     return skew_v  # (3, 3)
+
 
 def Exp(r):
     """so(3) vector to SO(3) matrix
@@ -62,8 +64,13 @@ def Exp(r):
     skew_r = vec2skew(r)  # (3, 3)
     norm_r = r.norm() + 1e-15
     eye = torch.eye(3, dtype=torch.float32, device=r.device)
-    R = eye + (torch.sin(norm_r) / norm_r) * skew_r + ((1 - torch.cos(norm_r)) / norm_r**2) * (skew_r @ skew_r)
+    R = (
+        eye
+        + (torch.sin(norm_r) / norm_r) * skew_r
+        + ((1 - torch.cos(norm_r)) / norm_r ** 2) * (skew_r @ skew_r)
+    )
     return R
+
 
 def make_c2w(r, t):
     """
@@ -75,7 +82,8 @@ def make_c2w(r, t):
     c2w = torch.cat([R, t.unsqueeze(1)], dim=1)  # (3, 4)
     c2w = convert3x4_4x4(c2w)  # (4, 4)
     return c2w
-    
+
+
 def convert3x4_4x4(input):
     """
     :param input:  (N, 3, 4) or (3, 4) torch or np
@@ -83,15 +91,29 @@ def convert3x4_4x4(input):
     """
     if torch.is_tensor(input):
         if len(input.shape) == 3:
-            output = torch.cat([input, torch.zeros_like(input[:, 0:1])], dim=1)  # (N, 4, 4)
+            output = torch.cat(
+                [input, torch.zeros_like(input[:, 0:1])], dim=1
+            )  # (N, 4, 4)
             output[:, 3, 3] = 1.0
         else:
-            output = torch.cat([input, torch.tensor([[0,0,0,1]], dtype=input.dtype, device=input.device)], dim=0)  # (4, 4)
+            output = torch.cat(
+                [
+                    input,
+                    torch.tensor(
+                        [[0, 0, 0, 1]], dtype=input.dtype, device=input.device
+                    ),
+                ],
+                dim=0,
+            )  # (4, 4)
     else:
         if len(input.shape) == 3:
-            output = np.concatenate([input, np.zeros_like(input[:, 0:1])], axis=1)  # (N, 4, 4)
+            output = np.concatenate(
+                [input, np.zeros_like(input[:, 0:1])], axis=1
+            )  # (N, 4, 4)
             output[:, 3, 3] = 1.0
         else:
-            output = np.concatenate([input, np.array([[0,0,0,1]], dtype=input.dtype)], axis=0)  # (4, 4)
+            output = np.concatenate(
+                [input, np.array([[0, 0, 0, 1]], dtype=input.dtype)], axis=0
+            )  # (4, 4)
             output[3, 3] = 1.0
     return output
