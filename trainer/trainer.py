@@ -278,6 +278,7 @@ class GaussianTrainer(object):
                 images = images[::interval]
             print("Total images: ", len(images))
             width, height = Image.open(images[0]).size
+
             if os.path.exists(cameras_intrinsic_file):
                 cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
                 intr = cam_intrinsics[1]
@@ -318,7 +319,7 @@ class GaussianTrainer(object):
             else:
                 self.data = [images[i] for i in self.i_train]
             self.seq_len = len(self.data)
-        else:
+        elif self.model_cfg.data_type == "tanks":
             source_path = self.model_cfg.source_path
             model_cfg = copy(self.model_cfg)
             model_cfg.model_path = ""
@@ -348,6 +349,8 @@ class GaussianTrainer(object):
                 print(image_name)
             self.data = viewpoint_stack
             self.seq_len = len(viewpoint_stack)
+        else:
+            raise ValueError("Unknown data type: ", self.model_cfg.data_type)
 
     def setup_model(self, pcd):
         radius = np.linalg.norm(pcd.points, axis=1).max()
@@ -560,8 +563,10 @@ class GaussianTrainer(object):
         )
 
         pcd_data = o3d.geometry.PointCloud()
-        pcd_data.points = o3d.utility.Vector3dVector(points)
-        pcd_data.colors = o3d.utility.Vector3dVector(image_np.reshape(-1, 3))
+        pcd_data.points = o3d.utility.Vector3dVector(points.astype(np.float64))
+        pcd_data.colors = o3d.utility.Vector3dVector(
+            image_np.reshape(-1, 3).astype(np.float64)
+        )
         pcd_data.estimate_normals()
         if down_sample:
             pcd_data = pcd_data.voxel_down_sample(voxel_size=0.01)
@@ -585,7 +590,6 @@ class GaussianTrainer(object):
         image_name = self.data[idx]
         intrinsics = self.intrinsic
         uid = idx
-
         original_image = Image.open(image_name).convert("RGB")
         width, height = original_image.size
         if min(width, height) > 1000:
@@ -635,7 +639,6 @@ class GaussianTrainer(object):
             w, h = original_image.size
             depth_tensor = torch.ones((h, w))
             self.mono_depth[idx] = depth_tensor.cuda()
-
         intr_mat_tensor = torch.from_numpy(intrinsics).float().to(depth_tensor.device)
         pts = depth_to_3d(
             depth_tensor[None, None], intr_mat_tensor[None], normalize_points=False
@@ -658,14 +661,19 @@ class GaussianTrainer(object):
         )
 
         pcd_data = o3d.geometry.PointCloud()
-        pcd_data.points = o3d.utility.Vector3dVector(points)
-        pcd_data.colors = o3d.utility.Vector3dVector(image_np.reshape(-1, 3))
+        pcd_data.points = o3d.utility.Vector3dVector(points.astype(np.float64))
+        pcd_data.colors = o3d.utility.Vector3dVector(
+            image_np.reshape(-1, 3).astype(np.float64)
+        )
         pcd_data.estimate_normals()
         if down_sample:
             voxel_size = 0.01
             while len(pcd_data.points) > 1_000_000:
                 pcd_data = pcd_data.voxel_down_sample(voxel_size=voxel_size)
                 voxel_size *= 5
+        # o3d.visualization.draw_geometries(
+        #     [pcd_data],
+        # )
 
         colors = np.asarray(pcd_data.colors, dtype=np.float32)
         points = np.asarray(pcd_data.points, dtype=np.float32)

@@ -119,6 +119,7 @@ class CFGaussianTrainer(GaussianTrainer):
         )
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
+
         loss_dict = self.compute_loss(
             render_pkg,
             viewpoint_cam,
@@ -211,7 +212,7 @@ class CFGaussianTrainer(GaussianTrainer):
         self.gs_render.gaussians.rotate_seq = False
         # Fit relative pose
         print(f"optimizing frame {view_idx_1:03d}")
-        optim_opt.iterations = 1000
+        optim_opt.iterations = 100
         optim_opt.densify_from_iter = optim_opt.iterations + 1
         progress_bar = tqdm(range(optim_opt.iterations), desc="Training progress")
         self.gs_render.gaussians.training_setup(
@@ -258,9 +259,10 @@ class CFGaussianTrainer(GaussianTrainer):
         )
         radius = np.linalg.norm(pcd.points, axis=1).max()
         self.gs_render_local.reset_model()
+
         self.gs_render_local.init_model(pcd)
         # Fit current gaussian
-        optim_opt.iterations = 1000
+        optim_opt.iterations = 100
         optim_opt.densify_from_iter = optim_opt.iterations + 1
         progress_bar = tqdm(range(optim_opt.iterations), desc="Training progress")
         self.gs_render_local.gaussians.training_setup(
@@ -299,7 +301,8 @@ class CFGaussianTrainer(GaussianTrainer):
 
         print(f"optimizing frame {view_idx:03d}")
         viewpoint_cam_ref = self.load_viewpoint_cam(view_idx, load_depth=True)
-        optim_opt.iterations = 300
+
+        optim_opt.iterations = 100
         optim_opt.densify_from_iter = optim_opt.iterations + 1
         self.gs_render_local.gaussians.init_RT(None)
         self.gs_render_local.gaussians.training_setup_fix_position(
@@ -448,7 +451,7 @@ class CFGaussianTrainer(GaussianTrainer):
         self,
     ):
         pipe = copy(self.pipe_cfg)
-        self.single_step = 500  # 300 for faster training; 500 for better results
+        self.single_step = 300  # 300 for faster training; 500 for better results
 
         num_iterations = self.single_step * (self.seq_len // 10) * 10
         self.optim_cfg.iterations = num_iterations
@@ -484,6 +487,7 @@ class CFGaussianTrainer(GaussianTrainer):
             pose[:3, :3] = R
             pose[:3, 3] = t
             poses_gt.append(torch.from_numpy(pose))
+
         pose_dict["poses_gt"] = torch.stack(poses_gt)
         max_frame = self.seq_len
         start_frame = 1
@@ -508,6 +512,7 @@ class CFGaussianTrainer(GaussianTrainer):
             for fidx in range(start_frame, end_frame):
                 # pcd_new, local_gauss_params = self.add_view(
                 #     None, fidx, fidx-1, pipe, optim_opt, reverse=reverse)
+
                 pcd_new, local_gauss_params = self.add_view_v2(fidx, fidx - 1)
                 self.gs_render.gaussians.rotate_seq = False
                 viewpoint_cam = self.load_viewpoint_cam(
